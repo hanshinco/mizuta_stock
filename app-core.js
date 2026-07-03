@@ -138,6 +138,8 @@ function boot() {
       if (url) window.open(url, '_blank');
     }).getSpreadsheetUrl();
   });
+
+  applyInitialRoute();   // 現在のURLに合わせて初期パネルを復元（deep link/リロード対応）
 };
 
 function setTodayDates() {
@@ -246,6 +248,36 @@ window.addEventListener('beforeunload', e => {
   }
 });
 
+/* ===== ルーティング（History API パス型：各メニューでURL変化。戻る/進む/リロード/ブックマークOK） =====
+   demo_rental と同方式。GitHub Pages のサブパス(/mizuta_stock/)は index.html 冒頭の <base> 自動注入で吸収。
+   存在しないパスは 404.html(=index.html) が返り、SPAが起動して既定=在庫一覧を表示する。 */
+const ROUTE_PANELS = ['inventory','pull','pull-drafts','ret','ret-drafts','newproduct','reconcile','inbound','history','master','help'];
+const ROUTE_BASE = window.__BASE || '/';
+let _routeSuppress = false;   // popstate/初期復元時は履歴を積まない
+function routePath(name) { return ROUTE_BASE + (name === 'inventory' ? '' : name); }   // 在庫一覧はルート(/)
+function routeParse() {
+  let path = location.pathname;
+  if (path.indexOf(ROUTE_BASE) === 0) path = path.slice(ROUTE_BASE.length);
+  let seg = (path.split('/').filter(Boolean)[0]) || '';
+  if (/^(index|404)\.html$/i.test(seg)) seg = '';        // /index.html・/404.html はルート扱い
+  if (!seg) return 'inventory';
+  return ROUTE_PANELS.indexOf(seg) >= 0 ? seg : 'inventory';   // 未知パスは在庫一覧へフォールバック
+}
+// 起動時：現在のURLに従って初期パネルを復元（deep link/リロードでも同じ画面）
+function applyInitialRoute() {
+  const name = routeParse();
+  _routeSuppress = true;
+  if (name !== 'inventory') switchPanel(name);          // inventory は既定でactiveなので何もしない
+  history.replaceState(null, '', routePath(name));      // URLを正規化
+  _routeSuppress = false;
+}
+// 戻る/進む
+window.addEventListener('popstate', function () {
+  _routeSuppress = true;
+  switchPanel(routeParse());
+  _routeSuppress = false;
+});
+
 function switchPanel(name) {
   document.querySelectorAll('.nav-link').forEach(a =>
     a.classList.toggle('active', a.dataset.panel === name)
@@ -262,6 +294,12 @@ function switchPanel(name) {
   if (name === 'inventory')    loadInventory();
   if (name === 'pull-drafts')  loadDraftsList('pull');
   if (name === 'ret-drafts')   loadDraftsList('ret');
+
+  // URLを現在のパネルに同期（ナビ/内部遷移では pushState、戻る進む・初期復元では積まない）
+  if (!_routeSuppress) {
+    const url = routePath(name);
+    if (url !== location.pathname) history.pushState(null, '', url);
+  }
 }
 
 // ============================================================
