@@ -1,6 +1,8 @@
 # ローカル専用（公開しない）: 引継書と現行GASソースの参照コピー
 /docs/
 /_legacy/
+# GAS APIバックエンドは clasp で Apps Script へデプロイする（GitHub Pages/公開リポジトリには載せない）
+/gas-api/
 
 node_modules/
 .DS_Store

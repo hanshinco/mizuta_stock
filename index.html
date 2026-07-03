@@ -27,8 +27,685 @@
 
 <div class="loading" id="loading" style="display:none">読み込み中…</div>
 
-<!-- アプリ本体（ログイン後に表示）。現行UIをここに移植 -->
-<div id="app" style="display:none"></div>
+<!-- アプリ本体（ログイン後に boot() で表示）。現行 _legacy/gas/ui.html のマークアップを移植。
+     絵文字はナビ＝単色SVG / その他＝テキストに置換（HANDOVER §7 の方針）。 -->
+<div id="app" style="display:none">
+
+<!-- ========== Sidebar ========== -->
+<div id="sidebar">
+  <h1>ミズタ在庫<br>管理システム</h1>
+  <nav>
+    <ul>
+      <li><a href="#" data-panel="inventory" class="nav-link active"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>在庫一覧</a></li>
+      <li class="nav-group" data-admin-only="1">
+        <a href="#" class="nav-toggle" data-group="pull"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h13"/><path d="M12 6l6 6-6 6"/></svg>引き寄せ依頼<span class="nav-arrow">▾</span></a>
+        <ul class="nav-submenu" id="submenu-pull">
+          <li><a href="#" data-panel="pull"        class="nav-link sub">＋ 新規作成</a></li>
+          <li><a href="#" data-panel="pull-drafts" class="nav-link sub">下書き</a></li>
+        </ul>
+      </li>
+      <li class="nav-group">
+        <a href="#" class="nav-toggle" data-group="ret"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12H7"/><path d="M12 6l-6 6 6 6"/></svg>返送依頼<span class="nav-arrow">▾</span></a>
+        <ul class="nav-submenu" id="submenu-ret">
+          <li><a href="#" data-panel="ret"        class="nav-link sub">＋ 新規作成</a></li>
+          <li><a href="#" data-panel="ret-drafts" class="nav-link sub">下書き</a></li>
+        </ul>
+      </li>
+      <!-- TODO(2026-06-17): 新商品追加メニューは v23 で一旦オフ。戻すときはこのコメントを外すだけでOK。 -->
+      <!-- <li><a href="#" data-panel="newproduct" class="nav-link">＋ 新商品追加</a></li> -->
+      <li data-admin-only="1"><a href="#" data-panel="reconcile" class="nav-link"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>在庫照合</a></li>
+      <li data-admin-only="1"><a href="#" data-panel="inbound" class="nav-link"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 20h16"/></svg>入庫報告書取込</a></li>
+      <li data-admin-only="1"><a href="#" data-panel="history" class="nav-link"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h12"/><path d="M8 12h12"/><path d="M8 18h12"/><path d="M3.6 6h.01"/><path d="M3.6 12h.01"/><path d="M3.6 18h.01"/></svg>依頼書履歴</a></li>
+      <li data-admin-only="1"><a href="#" data-panel="master" class="nav-link"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>マスタ更新</a></li>
+      <li><a href="#" data-panel="help" class="nav-link"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.9.4-1 1-1 1.7"/><path d="M12 17h.01"/></svg>使い方</a></li>
+    </ul>
+  </nav>
+  <div class="sidebar-footer" id="user-label"></div>
+</div>
+
+<!-- ========== Main ========== -->
+<div id="main">
+  <div id="main-header">
+    <h2 id="page-title">在庫一覧</h2>
+    <div class="gap-8">
+      <button class="btn btn-secondary btn-sm" id="btn-open-ss" data-admin-only="1">マスタDBを開く</button>
+      <button class="btn btn-secondary btn-sm" onclick="refreshData()">更新</button>
+    </div>
+  </div>
+
+  <div id="content">
+
+    <!-- ===== 在庫一覧 ===== -->
+    <div id="panel-inventory" class="panel active">
+      <div class="card">
+        <div class="form-row">
+          <div class="form-group">
+            <label>検索</label>
+            <input type="text" id="inv-search" placeholder="コード / 商品名" style="width:220px">
+          </div>
+          <div class="form-group">
+            <label>分類</label>
+            <select id="inv-cat" style="width:160px">
+              <option value="">すべて</option>
+            </select>
+          </div>
+          <label style="align-self:flex-end;display:flex;align-items:center;gap:4px;padding-bottom:6px">
+            <input type="checkbox" id="inv-show-zero" checked> 在庫0も表示
+          </label>
+          <button class="btn btn-secondary btn-sm ml-auto" id="btn-csv">CSV</button>
+        </div>
+      </div>
+      <div class="card" style="padding:0">
+        <div class="tbl-wrap">
+          <table id="inv-table">
+            <thead>
+              <tr>
+                <th>ミズタコード</th>
+                <th>ミズタ商品名</th>
+                <th>弥生コード</th>
+                <th>弥生商品名</th>
+                <th>入数</th>
+                <th class="text-right">在庫数</th>
+                <th class="text-right">ケース</th>
+                <th class="text-right">内バラ</th>
+                <th>最終更新</th>
+                <th>分類</th>
+              </tr>
+            </thead>
+            <tbody id="inv-tbody"></tbody>
+          </table>
+        </div>
+        <div style="padding:8px 16px;font-size:12px;color:var(--gray-600)" id="inv-count"></div>
+      </div>
+    </div>
+
+    <!-- ===== 引き寄せ依頼 ===== -->
+    <div id="panel-pull" class="panel">
+      <div class="card">
+        <div class="card-title">引き寄せ依頼書作成</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>依頼日 *</label>
+            <input type="date" id="pull-date">
+          </div>
+          <div class="form-group">
+            <label>配送方法 *</label>
+            <select id="pull-delivery">
+              <option value="">------ 選択してください ------</option>
+              <option value="トラック">トラック便</option>
+              <option value="佐川">佐川急便</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>希望到着日</label>
+            <input type="date" id="pull-arrival-date">
+          </div>
+          <button class="btn btn-secondary ml-auto" id="btn-pull-save"
+            style="align-self:flex-end">下書き保存</button>
+          <button class="btn btn-secondary" id="btn-pull-new"
+            style="align-self:flex-end">クリアして新規作成</button>
+        </div>
+        <div id="pull-alerts"></div>
+        <div class="tbl-wrap mt-8">
+          <table class="item-table">
+            <thead>
+              <tr>
+                <th style="width:150px">コード(弥生)</th>
+                <th style="width:240px">商品名(弥生)</th>
+                <th style="width:130px">コード(ミズタ)</th>
+                <th style="width:240px">商品名(ミズタ)</th>
+                <th style="width:55px">入数</th>
+                <th style="width:80px">数量(個)</th>
+                <th style="width:60px">ケース</th>
+                <th style="width:60px">内バラ</th>
+                <th style="width:60px">在庫</th>
+                <th style="width:110px">備考</th>
+                <th style="width:36px"></th>
+              </tr>
+            </thead>
+            <tbody id="pull-items"></tbody>
+          </table>
+        </div>
+        <button class="btn btn-secondary btn-sm mt-8" onclick="addItemRow('pull')">＋ 行追加</button>
+        <div class="gap-8 mt-16">
+          <div style="font-size:13px">
+            合計: <span id="pull-total-cases" class="qty">0</span> ケース /
+            <span id="pull-total-qty" class="qty">0</span> 個
+          </div>
+          <button class="btn btn-primary ml-auto" id="btn-pull-submit">
+            プレビュー
+          </button>
+        </div>
+      </div>
+      <div id="pull-result" class="hidden"></div>
+    </div>
+
+    <!-- ===== 返送依頼 ===== -->
+    <div id="panel-ret" class="panel">
+      <div class="card">
+        <div class="card-title">返送依頼書作成</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>入庫予定日 *</label>
+            <input type="date" id="ret-date">
+          </div>
+          <button class="btn btn-secondary ml-auto" id="btn-ret-save"
+            style="align-self:flex-end">下書き保存</button>
+          <button class="btn btn-secondary" id="btn-ret-new"
+            style="align-self:flex-end">クリアして新規作成</button>
+        </div>
+        <div class="tbl-wrap mt-8">
+          <table class="item-table">
+            <thead>
+              <tr>
+                <th style="width:150px">コード(弥生)</th>
+                <th style="width:240px">商品名(弥生)</th>
+                <th style="width:130px">コード(ミズタ)</th>
+                <th style="width:240px">商品名(ミズタ)</th>
+                <th style="width:48px" title="ミズタ商品名のバイト数。半角=1 / 全角=2。36バイト超で赤">文字数</th>
+                <th style="width:55px">入数</th>
+                <th style="width:80px">数量(個)</th>
+                <th style="width:60px">ケース</th>
+                <th style="width:60px">内バラ</th>
+                <th>摘要(品番/JAN)</th>
+                <th style="width:36px"></th>
+              </tr>
+            </thead>
+            <tbody id="ret-items"></tbody>
+          </table>
+        </div>
+        <button class="btn btn-secondary btn-sm mt-8" onclick="addItemRow('ret')">＋ 行追加</button>
+        <div class="gap-8 mt-16">
+          <div style="font-size:13px">
+            合計: <span id="ret-total-cases" class="qty">0</span> ケース /
+            <span id="ret-total-qty" class="qty">0</span> 個
+          </div>
+          <button class="btn btn-primary ml-auto" id="btn-ret-submit">
+            プレビュー
+          </button>
+        </div>
+      </div>
+      <div id="ret-result" class="hidden"></div>
+    </div>
+
+    <!-- ===== 新商品追加 ===== -->
+    <div id="panel-newproduct" class="panel">
+      <div class="steps">
+        <div class="step active" id="step1-tab">Step 1: 弥生コード紐付け</div>
+        <div class="step"        id="step2-tab">Step 2: ミズタコード登録</div>
+        <div class="step"        id="step3-tab">Step 3: プレビュー・確定</div>
+      </div>
+
+      <!-- Step 1 -->
+      <div id="step1" class="card">
+        <div class="card-title">弥生コードの紐付け</div>
+        <div class="form-row">
+          <label><input type="radio" name="yayoi-mode" value="existing" checked
+            onchange="toggleYayoiMode(this.value)"> 既存の弥生コードに紐付ける</label>
+          <label><input type="radio" name="yayoi-mode" value="new"
+            onchange="toggleYayoiMode(this.value)"> 新規弥生コードを作成</label>
+          <label><input type="radio" name="yayoi-mode" value="none"
+            onchange="toggleYayoiMode(this.value)"> 弥生未登録（紐付けなし）</label>
+        </div>
+
+        <!-- 既存モード -->
+        <div id="yayoi-existing">
+          <div class="form-group" style="max-width:400px">
+            <label>弥生コード検索 *</label>
+            <div class="autocomplete-wrap">
+              <input type="text" id="yayoi-search" placeholder="コードまたは商品名で検索"
+                class="w-full" oninput="onYayoiSearch(this.value)">
+              <ul class="autocomplete-list hidden" id="yayoi-ac-list"></ul>
+            </div>
+          </div>
+          <div id="yayoi-selected-info" class="hidden alert alert-info mt-8"></div>
+        </div>
+
+        <!-- 新規モード -->
+        <div id="yayoi-new" class="hidden">
+          <div class="form-row">
+            <div class="form-group">
+              <label>弥生コード *</label>
+              <input type="text" id="new-yayoi-code" style="width:180px">
+            </div>
+            <div class="form-group" style="flex:1">
+              <label>商品名 *</label>
+              <input type="text" id="new-yayoi-name" style="width:100%">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>分類1</label>
+              <input type="text" id="new-yayoi-cat1" style="width:160px">
+            </div>
+            <div class="form-group">
+              <label>分類4コード</label>
+              <input type="text" id="new-yayoi-cat4code" style="width:120px">
+            </div>
+            <div class="form-group">
+              <label>分類4名称</label>
+              <input type="text" id="new-yayoi-cat4name" style="width:160px">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>税抜上代</label>
+              <input type="number" id="new-yayoi-price">
+            </div>
+            <div class="form-group">
+              <label>税抜仕入単価</label>
+              <input type="number" id="new-yayoi-cost">
+            </div>
+          </div>
+        </div>
+        <!-- 弥生未登録モード -->
+        <div id="yayoi-none-info" class="hidden alert alert-info mt-8">
+          弥生コードに紐付けずに登録します。在庫管理・依頼書作成は可能です。<br>
+          依頼書の商品名はミズタ商品名が使われます（弥生商品名は空欄）。後から在庫照合や編集で紐付けできます。
+        </div>
+        <button class="btn btn-primary mt-16" onclick="goStep(2)">次へ →</button>
+      </div>
+
+      <!-- Step 2 -->
+      <div id="step2" class="card hidden">
+        <div class="card-title">ミズタコード（バリエーション）登録</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>ミズタコード *</label>
+            <input type="text" id="np-mizuta-code" style="width:220px"
+              oninput="onMizutaCodeInput(this.value)">
+          </div>
+          <div class="form-group" style="flex:1">
+            <label>ミズタ商品名 *</label>
+            <input type="text" id="np-mizuta-name" class="w-full">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>入数 *</label>
+            <input type="number" id="np-iri" min="1">
+          </div>
+          <div class="form-group" style="display:none">
+            <label>状態 *</label>
+            <select id="np-status">
+              <option value="通常">通常</option>
+              <option value="サンプル">サンプル</option>
+              <option value="NG">NG</option>
+              <option value="旧パッケージ">旧パッケージ</option>
+              <option value="新パッケージ">新パッケージ</option>
+              <option value="OS">OS</option>
+            </select>
+          </div>
+          <div class="form-group" style="display:none">
+            <label>入荷ロット日</label>
+            <input type="date" id="np-lot-date">
+          </div>
+          <div class="form-group">
+            <label>初期在庫数(個) *</label>
+            <input type="number" id="np-init-qty" min="0" value="0">
+          </div>
+        </div>
+        <div id="code-decompose-preview" class="alert alert-info hidden mt-8"></div>
+        <div class="gap-8 mt-16">
+          <button class="btn btn-secondary" onclick="goStep(1)">← 戻る</button>
+          <button class="btn btn-primary"   onclick="goStep(3)">プレビュー確認 →</button>
+        </div>
+      </div>
+
+      <!-- Step 3: プレビュー -->
+      <div id="step3" class="card hidden">
+        <div class="card-title">登録内容の確認</div>
+        <div id="np-preview"></div>
+        <div class="gap-8 mt-16">
+          <button class="btn btn-secondary" onclick="goStep(2)">← 戻る</button>
+          <button class="btn btn-success"   id="btn-np-commit">確定して登録</button>
+          <button class="btn btn-outline"   id="btn-np-continue" style="margin-left:8px">
+            続けて登録（弥生コード保持）
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 在庫照合 ===== -->
+    <div id="panel-reconcile" class="panel">
+      <div class="card">
+        <div class="card-title">月次在庫照合（在庫報告書 Excel インポート）</div>
+        <p style="font-size:13px;color:var(--gray-600);margin-bottom:12px">
+          ミズタから届いた在庫報告書 (.xlsx) をアップロードしてください。
+          システム内の在庫数との差異を確認できます。
+        </p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>在庫報告書 (.xlsx) *</label>
+            <input type="file" id="rec-file" accept=".xlsx">
+          </div>
+          <button class="btn btn-primary" id="btn-rec-import" style="align-self:flex-end">
+            インポート・差異確認
+          </button>
+        </div>
+      </div>
+      <div id="rec-result" class="hidden">
+        <div class="card">
+          <div class="card-title">差異一覧</div>
+          <p style="font-size:12px;color:var(--gray-600);margin-bottom:10px">
+            各行の「取扱い」を選択してから「確定」してください。既定は「Excelに合わせる」です。<br>
+            <span style="color:#c62828">「新規（未登録）」の行</span>は弥生コード・弥生商品名を入力して「新規商品を登録」を押すと、弥生に紐づけて登録できます（弥生コードは空欄でも登録可）。
+          </p>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ミズタコード</th>
+                  <th>商品名</th>
+                  <th>弥生コード</th>
+                  <th>弥生商品名</th>
+                  <th class="text-right">システム値</th>
+                  <th class="text-right">Excel値</th>
+                  <th class="text-right">差異</th>
+                  <th>取扱い</th>
+                </tr>
+              </thead>
+              <tbody id="rec-tbody"></tbody>
+            </table>
+          </div>
+          <div class="gap-8 mt-16">
+            <span style="font-size:12px;color:var(--gray-600)" id="rec-summary"></span>
+            <button class="btn btn-success ml-auto" id="btn-rec-register" style="display:none">新規商品を登録</button>
+            <button class="btn btn-primary" id="btn-rec-apply">差異を確定</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 入庫報告書取込 ===== -->
+    <div id="panel-inbound" class="panel">
+      <div class="card">
+        <div class="card-title">入庫報告書 PDF 取込</div>
+        <p style="font-size:13px;color:var(--gray-600);margin-bottom:12px">
+          ミズタから届いた入庫報告書 (.pdf) をアップロードしてください。<br>
+          <strong>商品バリエーション</strong>には商品コード／商品名／入数を追加（既存コードは何もしません）。<br>
+          <strong>在庫台帳</strong>には入庫数／ケース数／内バラ数を追加（既存コードは加算します）。<br>
+          アップロード後、内容を確認してから「反映」を押してください。
+        </p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>入庫報告書 (.pdf) *</label>
+            <input type="file" id="inb-file" accept="application/pdf,.pdf">
+          </div>
+          <button class="btn btn-primary" id="btn-inb-parse" style="align-self:flex-end">
+            解析してプレビュー
+          </button>
+        </div>
+      </div>
+      <div id="inb-result" class="hidden">
+        <div class="card">
+          <div class="card-title">プレビュー</div>
+          <p style="font-size:12px;color:var(--gray-600);margin-bottom:10px" id="inb-summary"></p>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>商品コード</th>
+                  <th>商品名</th>
+                  <th class="text-right">入数</th>
+                  <th class="text-right">入庫数</th>
+                  <th class="text-right">ケース</th>
+                  <th class="text-right">内バラ</th>
+                  <th>バリエーション</th>
+                  <th>在庫台帳</th>
+                </tr>
+              </thead>
+              <tbody id="inb-tbody"></tbody>
+            </table>
+          </div>
+          <div id="inb-warnings" class="mt-16"></div>
+          <div class="gap-8 mt-16">
+            <button class="btn btn-primary ml-auto" id="btn-inb-apply">スプレッドシートに反映</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 依頼書履歴 ===== -->
+    <div id="panel-history" class="panel">
+      <div class="card">
+        <div class="form-row">
+          <div class="form-group">
+            <label>種別</label>
+            <select id="hist-type">
+              <option value="all">すべて</option>
+              <option value="引き寄せ">引き寄せ</option>
+              <option value="返送">返送</option>
+            </select>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btn-hist-reload"
+            style="align-self:flex-end">再読み込み</button>
+          <button class="btn btn-danger btn-sm" id="btn-hist-delete"
+            style="align-self:flex-end">選択削除</button>
+        </div>
+      </div>
+      <div class="card" style="padding:0">
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:32px"><input type="checkbox" id="hist-select-all" title="全選択"></th>
+                <th>ID</th>
+                <th>種別</th>
+                <th>配送</th>
+                <th>依頼日</th>
+                <th>希望到着日</th>
+                <th class="text-right">合計ケース</th>
+                <th>ステータス</th>
+                <th>作成者</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="hist-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== マスタ更新 ===== -->
+    <div id="panel-master" class="panel">
+      <div class="card">
+        <div class="card-title">弥生商品マスタの更新</div>
+        <p style="font-size:13px;color:var(--gray-600);margin-bottom:12px">
+          弥生からエクスポートした商品マスタ (.xlsx) をアップロードすると、その場で商品マスタを更新します。<br>
+          <strong>※商品リストを一切加工せずにアップロードしてください。(加工するとバグります)</strong>
+        </p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>弥生商品マスタ (.xlsx) *</label>
+            <input type="file" id="master-file" accept=".xlsx">
+          </div>
+          <button class="btn btn-primary" id="btn-master-import" style="align-self:flex-end">
+            アップロードして更新
+          </button>
+        </div>
+        <div id="master-result"></div>
+      </div>
+    </div>
+
+    <!-- ===== 使い方 ===== -->
+    <div id="panel-help" class="panel">
+      <div class="card">
+        <div class="card-title">在庫一覧</div>
+        <p style="font-size:13px;margin-bottom:8px">登録されている商品の在庫数を一覧表示します。</p>
+        <ol style="font-size:13px;line-height:1.8;padding-left:22px;margin:0">
+          <li>左の検索欄にコード or 商品名を入れると絞り込み</li>
+          <li>分類4プルダウンでブランド絞り込み</li>
+          <li>「在庫0も表示」チェックで在庫切れ品も表示</li>
+          <li>右上「CSV」で表示中のリストをExcel取込用にダウンロード</li>
+        </ol>
+      </div>
+
+      <div class="card" data-admin-only="1">
+        <div class="card-title">引き寄せ依頼</div>
+        <p style="font-size:13px;margin-bottom:8px">
+          ミズタ倉庫から自社へ商品を取り寄せるための依頼書（PDF）を作成します。<br>
+          <strong>確定すると当方在庫が減算されます</strong>。
+        </p>
+        <ol style="font-size:13px;line-height:1.8;padding-left:22px;margin:0">
+          <li>依頼日・配送方法（トラック/佐川）・希望到着日を入力</li>
+          <li>「＋ 行追加」で品目を追加。検索ボックスからマスタを選んで数量入力</li>
+          <li>右側に在庫数が表示される。在庫超過は赤塗りで警告</li>
+          <li>「プレビュー」→ PDFを確認</li>
+          <li>「確定して下書き作成」→ Gmail下書きにPDFが添付＋在庫減算＋ログ追加</li>
+          <li>同一着日のケース合計が 80未満/100超のとき注意警告が出る</li>
+        </ol>
+      </div>
+
+      <div class="card">
+        <div class="card-title">返送依頼</div>
+        <p style="font-size:13px;margin-bottom:8px">
+          ミズタ倉庫へ商品を返送するための依頼書（Excel）を作成します。<br>
+          <strong>在庫台帳は触りません</strong>（在庫の動きは「入庫報告書取込」で別途反映）。
+        </p>
+        <p style="font-size:13px;margin:8px 0 4px"><strong>＋ 新規作成</strong></p>
+        <ol style="font-size:13px;line-height:1.8;padding-left:22px;margin:0 0 10px">
+          <li>入庫予定日を入力</li>
+          <li>「＋ 行追加」で品目行を追加し、各セルを直接入力（または検索ボックスからマスタ候補選択）
+            <ul style="margin:4px 0;padding-left:20px">
+              <li>マスタに無いコードや入数違いも、その場で書き換えられる</li>
+              <li>ミズタ商品名は半角36バイト以内（文字数列が赤くなったらNG）</li>
+              <li>入数が空 or 0だと赤くなる</li>
+            </ul>
+          </li>
+          <li>「下書き保存」で途中保存（→ 同時にDriveにコピペ用スプシが生成される）</li>
+          <li>「プレビュー」を押すとPDFプレビューが表示される</li>
+          <li>内容OKなら「確定して Excel下書き作成」 → Gmail下書きに Excel が添付される</li>
+        </ol>
+        <p style="font-size:13px;margin:8px 0 4px"><strong>下書き</strong></p>
+        <ol style="font-size:13px;line-height:1.8;padding-left:22px;margin:0">
+          <li>過去に保存した返送下書きが一覧表示される</li>
+          <li>「スプシ」で下書きスプシを開く（段ボール貼付のコピペ用）</li>
+          <li>「開く」でフォームに展開、修正して保存 or 確定</li>
+          <li>「削除」で下書きとスプシをまとめて削除</li>
+        </ol>
+      </div>
+
+      <div class="card" data-admin-only="1">
+        <div class="card-title">在庫照合（月次）</div>
+        <p style="font-size:13px;margin-bottom:8px">
+          ミズタから届いた月次の在庫報告書（Excel）と当方DBを突き合わせて差異を確認・反映します。<br>
+          <strong>未登録の新商品もここで一括登録できます</strong>。
+        </p>
+        <ol style="font-size:13px;line-height:1.8;padding-left:22px;margin:0">
+          <li>ミズタ在庫報告書 (.xlsx) を選んで「インポート・差異確認」</li>
+          <li>差異一覧が表示される（緑=多い／赤=少ない／ピンク=未登録）</li>
+          <li>未登録行は弥生コード/弥生名を入れて「新規商品を登録」</li>
+          <li>各差異の取扱い（Excelに合わせる/システム維持）を選んで「差異を確定」</li>
+        </ol>
+      </div>
+
+      <div class="card" data-admin-only="1">
+        <div class="card-title">入庫報告書取込</div>
+        <p style="font-size:13px;margin-bottom:8px">
+          ミズタから届く入庫報告書PDFを取り込み、商品バリエーション（新規分）と在庫台帳を更新します。<br>
+          <strong>返送系で在庫が動かなくなった分、ここで一括反映する運用</strong>です。
+        </p>
+        <ol style="font-size:13px;line-height:1.8;padding-left:22px;margin:0">
+          <li>入庫報告書 (.pdf) を選んで「解析してプレビュー」</li>
+          <li>新規追加/加算更新の内訳をプレビューで確認</li>
+          <li>「スプレッドシートに反映」で書き込み</li>
+        </ol>
+        <p style="font-size:12px;color:var(--gray-600);margin-top:8px">
+          ※ バリエーションは新規だけ追加（既存コードはスキップ）／在庫台帳は既存なら加算更新
+        </p>
+      </div>
+
+      <div class="card" data-admin-only="1">
+        <div class="card-title">依頼書履歴</div>
+        <p style="font-size:13px;margin-bottom:8px">過去に作成した依頼書（引き寄せ/返送）の一覧と管理。</p>
+        <ol style="font-size:13px;line-height:1.8;padding-left:22px;margin:0">
+          <li>種別プルダウンで絞り込み</li>
+          <li>各行から Gmail / PDF / Excel を開ける</li>
+          <li>「受け取り済みにする」「返送済みにする」ボタンでステータス更新</li>
+          <li>左のチェックを入れて「選択削除」で削除（引き寄せは在庫を戻す、返送は在庫据え置き）</li>
+        </ol>
+      </div>
+
+      <div class="card" data-admin-only="1">
+        <div class="card-title">マスタ更新</div>
+        <p style="font-size:13px;margin-bottom:8px">弥生からエクスポートした商品マスタを丸ごと置換します。</p>
+        <ol style="font-size:13px;line-height:1.8;padding-left:22px;margin:0">
+          <li>弥生商品マスタ (.xlsx) を選択</li>
+          <li>「アップロードして更新」</li>
+        </ol>
+        <p style="font-size:12px;color:var(--gray-600);margin-top:8px">
+          ※ 商品リストは加工せずにアップロード。加工するとバグる
+        </p>
+      </div>
+
+      <div class="card" data-admin-only="1">
+        <div class="card-title">マスタDBを開く（右上ボタン）</div>
+        <p style="font-size:13px;margin:0">
+          スプレッドシート本体を別タブで開きます。シート構成・依頼書ログ・下書き操作ログなどの裏側を直接確認したいときに使います。
+        </p>
+      </div>
+    </div>
+
+    <!-- ===== 引き寄せ 下書き一覧 ===== -->
+    <div id="panel-pull-drafts" class="panel">
+      <div class="card">
+        <div class="card-title">引き寄せ依頼 下書き一覧</div>
+        <p style="font-size:12px;color:var(--gray-600);margin-bottom:10px">
+          保存した下書きを開いて編集・再利用できます。共有なのでメンバー全員の下書きが見えます。
+        </p>
+        <div id="pull-draft-list"></div>
+        <div class="gap-8 mt-16">
+          <button class="btn btn-secondary" id="btn-pull-draft-log">操作ログ</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 返送 下書き一覧 ===== -->
+    <div id="panel-ret-drafts" class="panel">
+      <div class="card">
+        <div class="card-title">返送依頼 下書き一覧</div>
+        <p style="font-size:12px;color:var(--gray-600);margin-bottom:10px">
+          保存した下書きを開いて編集・再利用できます。共有なのでメンバー全員の下書きが見えます。
+        </p>
+        <div id="ret-draft-list"></div>
+        <div class="gap-8 mt-16">
+          <button class="btn btn-secondary" id="btn-ret-draft-log">操作ログ</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /#content -->
+</div><!-- /#main -->
+
+<!-- 下書き一覧モーダル -->
+<div id="draft-modal" class="hidden modal-backdrop">
+  <div class="modal-box">
+    <div class="modal-title" id="draft-modal-title">下書き一覧</div>
+    <div id="draft-list"></div>
+    <div class="gap-8 mt-16">
+      <button class="btn btn-secondary" id="draft-log-btn">操作ログ</button>
+      <button class="btn btn-secondary ml-auto" id="draft-close">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- 汎用確認モーダル -->
+<div id="confirm-modal" class="hidden modal-backdrop">
+  <div class="modal-box" style="width:420px">
+    <div id="confirm-title" style="font-size:18px;font-weight:700;margin-bottom:10px"></div>
+    <div id="confirm-msg" style="font-size:14px;color:var(--gray-700);margin-bottom:22px"></div>
+    <div class="gap-8">
+      <button class="btn btn-secondary ml-auto" id="confirm-cancel">キャンセル</button>
+      <button class="btn btn-primary" id="confirm-ok">終了</button>
+    </div>
+  </div>
+</div>
+
+<!-- Loading overlay -->
+<div id="overlay"><div class="spinner"></div><div id="overlay-msg" style="font-size:13px"></div></div>
+
+</div><!-- /#app -->
 
 <script src="config.js"></script>
 <script src="app-core.js"></script>
