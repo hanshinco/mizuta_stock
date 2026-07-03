@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- ルーティングのベースパス自動判定（github.ioのサブパスとローカル / の両対応）。相対資産解決の要。 -->
+<script>(function(){var b=location.hostname.indexOf('github.io')>=0?'/'+(location.pathname.split('/')[1]||'')+'/':'/';window.__BASE=b;document.write('<base href="'+b+'">');})();</script>
+<title>ミズタ在庫管理</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#1f2430">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+<!-- ログインゲート（組織のGoogleアカウント。共通の社員証でSSO） -->
+<div id="login">
+  <div class="login-card">
+    <span class="mk"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5 12 4l9 4.5-9 4.5-9-4.5Z"/><path d="M3 12l9 4.5L21 12M3 15.5 12 20l9-4.5"/></svg></span>
+    <p class="login-title">ミズタ在庫管理</p>
+    <p class="login-note">Googleアカウントでログインしてください。</p>
+    <div id="gbtn"></div>
+    <div id="login-msg" class="login-msg"></div>
+  </div>
+</div>
+
+<div class="loading" id="loading" style="display:none">読み込み中…</div>
+
+<!-- アプリ本体（ログイン後に表示）。現行UIをここに移植 -->
+<div id="app" style="display:none"></div>
+
+<script src="config.js"></script>
+<script src="app-core.js"></script>
+<script src="auth.js"></script>
+</body>
+</html>

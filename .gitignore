@@ -1,0 +1,7 @@
+# ローカル専用（公開しない）: 引継書と現行GASソースの参照コピー
+/docs/
+/_legacy/
+
+node_modules/
+.DS_Store
+*.log
