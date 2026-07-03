@@ -1,0 +1,44 @@
+name: Deploy to GitHub Pages
+
+# 標準の「Deploy from a branch」デプロイャがフレークするため、
+# 明示的な GitHub Actions ワークフローで静的サイトを Pages へ配信する。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:   # 手動再実行できるように
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時実行を1本に絞り、詰まり（stuck queue）を防ぐ
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pages が未有効/別ソースでも、ここで「GitHub Actions」ソースとして有効化する
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      # リポジトリ直下（.gitignore 済みの docs/_legacy/gas-api は含まれない）をそのまま配信
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
