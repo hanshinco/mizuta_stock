@@ -32,6 +32,11 @@ const state = {
   previewRet: null,
   // ログインユーザーが ADMIN_EMAILS に含まれるか。サーバーから取得するまでは false（安全側）
   isAdmin: false,
+  // 権限の確定状態を3値で持つ: 'unknown'(確認中/未確定) | 'admin' | 'user'。
+  // 'unknown' と確定 'user' を区別し、権限APIがこけただけの時に「権限のない人UI」で固定しない。
+  adminState: 'unknown',
+  // 在庫キャッシュの取得時刻（loadInventory の再訪キャッシュ判定に使う）
+  _invLoadedAt: 0,
 };
 
 // 要素があればクリックイベントを登録（未デプロイ時のエラーで初期化が止まるのを防ぐ）
@@ -41,7 +46,8 @@ function bindClick(id, fn) {
 }
 
 // サイドバー左下にログインユーザー（写真・氏名・メール）を表示。共通アカウントなら で注意喚起。
-function loadCurrentUserLabel() {
+function loadCurrentUserLabel(attempt) {
+  attempt = attempt || 1;
   google.script.run
     .withSuccessHandler(prof => {
       const el = document.getElementById('user-label');
@@ -54,6 +60,7 @@ function loadCurrentUserLabel() {
       state._profileCache[email.toLowerCase()] = { email: email, name: name, photoUrl: photo };
       // 権限を反映: data-admin-only 要素は body.is-admin が付くまで非表示（styles.html 側で制御）
       state.isAdmin = !!(prof && prof.isAdmin);
+      state.adminState = state.isAdmin ? 'admin' : 'user';   // 確定
       document.body.classList.toggle('is-admin', state.isAdmin);
       const isShared = email.toLowerCase() === 'sales@hanshinco.com';
       const warn = isShared
@@ -64,7 +71,7 @@ function loadCurrentUserLabel() {
       const avatar = photo
         ? `<img src="${esc(photo)}" referrerpolicy="no-referrer" alt="" `
           + `style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex:none" `
-          + `onerror="this.outerHTML=userChip('${esc(email).replace(/'/g,'')}')">`
+          + `onerror="this.outerHTML=userChip('${esc(String(email).replace(/'/g,''))}')">`
         : userChip(email);
       el.innerHTML =
         `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">`
@@ -76,7 +83,25 @@ function loadCurrentUserLabel() {
         + `</div>`
         + `</div>`;
     })
-    .withFailureHandler(() => {})
+    .withFailureHandler(() => {
+      // ここで握りつぶすと state.isAdmin が false のままになり、管理者に「権限の無い人の表示」を
+      // 見せてしまう（管理者メニューが隠れる）。api() 側で既に数回リトライ済みだが、より長い
+      // 一時障害に備えてアプリ側でも間隔を空けて再試行する。
+      if (attempt < 3) {
+        setTimeout(() => loadCurrentUserLabel(attempt + 1), attempt * 2000);
+      } else {
+        // 確定できなかった＝'unknown' のまま。黙って一般ユーザーUIに固定せず、ユーザーに再確認手段を出す。
+        console.warn('ユーザー権限の取得に失敗しました。管理者メニューが表示されない場合は再読み込みしてください。');
+        const el = document.getElementById('user-label');
+        if (el && state.adminState === 'unknown') {
+          el.innerHTML =
+            `<div style="font-size:11px;color:#ffd">権限を確認できませんでした。`
+            + `<button id="perm-retry" class="btn btn-secondary btn-xs" style="margin-left:6px">再確認</button></div>`;
+          const b = document.getElementById('perm-retry');
+          if (b) b.addEventListener('click', () => loadCurrentUserLabel(1));
+        }
+      }
+    })
     .getCurrentUserProfile();
 }
 
@@ -291,7 +316,7 @@ function switchPanel(name) {
   _openParentSubmenuFor(name);
 
   if (name === 'history')      loadHistory();
-  if (name === 'inventory')    loadInventory();
+  if (name === 'inventory')    loadInventory(true);   // ナビ再訪はキャッシュが新しければ通信しない
   if (name === 'pull-drafts')  loadDraftsList('pull');
   if (name === 'ret-drafts')   loadDraftsList('ret');
 
@@ -318,14 +343,33 @@ function busyOff() { try { hideLoading(); } catch (e) {} }
 // ============================================================
 // 在庫一覧
 // ============================================================
-function loadInventory() {
+// useCache=true（ナビでの再訪など）のときは、直近取得のキャッシュが新しければ
+// サーバーへ行かず再描画だけで済ませる。重い3シート読みを毎回走らせないことで
+// 負荷と、一過性ヒカップに当たる回数を減らす。
+// ★在庫が変わる操作（確定・照合・入庫取込・更新ボタン）の後は必ず loadInventory()（引数なし）で
+//   サーバーから取り直すこと（キャッシュを使わない＝常に最新を表示）。
+const INV_FRESH_MS = 60 * 1000;
+function loadInventory(useCache) {
+  if (useCache && Array.isArray(state.inventory) && state.inventory.length
+      && state._invLoadedAt && (Date.now() - state._invLoadedAt) < INV_FRESH_MS) {
+    filterInventory();   // キャッシュから即描画（通信なし）
+    return;
+  }
   showLoading('在庫データを読み込み中…');
   google.script.run
     .withSuccessHandler(data => {
+      hideLoading();
+      // 一過性の通信失敗で配列以外が返ることがある。ここで弾いて cryptic な
+      // 「Cannot read properties of undefined (reading 'map')」を防ぐ。
+      if (!Array.isArray(data)) {
+        alert('在庫データを正しく取得できませんでした。通信が不安定な可能性があります。\n'
+          + 'お手数ですが、画面を再読み込みしてください。');
+        return; // 既存の state.inventory は壊さない（前回表示を保持）
+      }
       state.inventory = data;
+      state._invLoadedAt = Date.now();
       buildCategoryFilter(data);
       filterInventory();
-      hideLoading();
     })
     .withFailureHandler(err => { hideLoading(); alert('エラー: ' + err.message); })
     .getInventoryList();
@@ -398,8 +442,12 @@ function statusBadge(s) {
   return `<span class="badge badge-${map[s] || 'normal'}">${esc(s || '通常')}</span>`;
 }
 
+// HTMLエスケープ。テキストだけでなく属性値（src="..." title="..." 等）にも差し込むため、
+// 引用符 " ' もエスケープして属性からの脱出を防ぐ（値がGoogleプロフィールやマスタでもXSSにしない）。
 function esc(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 // 半角換算の文字数（半角=1, 全角=2。半角カナは1）
@@ -686,7 +734,7 @@ function userAvatar(email, profileMap) {
   const p = profileMap && profileMap[e.toLowerCase()];
   if (p && p.photoUrl) {
     const tip = p.name ? `${p.name} (${e})` : e;
-    const safeE = esc(e).replace(/'/g, '');
+    const safeE = esc(String(e).replace(/'/g, ''));
     return `<img src="${esc(p.photoUrl)}" referrerpolicy="no-referrer" alt="" title="${esc(tip)}" `
       + `style="width:24px;height:24px;border-radius:50%;object-fit:cover;flex:none;cursor:default" `
       + `onerror="this.outerHTML=userChip('${safeE}')">`;

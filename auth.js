@@ -36,16 +36,45 @@ function decodeJwt(token) {
   return JSON.parse(json);
 }
 
+// 副作用の無い読み取り専用アクション。GAS/ネットワークの一時失敗時に自動リトライしても
+// 二重処理にならないものだけを列挙する（書き込み系は1発勝負のまま＝二重登録を防ぐ）。
+// ★新しい読み取りAPIを足したらここにも追加すること。
+var IDEMPOTENT_ACTIONS = {
+  ping: 1, getCurrentUserProfile: 1, getUserProfiles: 1, getSpreadsheetUrl: 1,
+  getInventoryList: 1, searchYayoiMaster: 1,
+  listRequestDrafts: 1, loadRequestDraft: 1, listDraftLogs: 1,
+  getReconciliationDiff: 1, getRequestLog: 1,
+};
+
 // GAS API 呼び出し（text/plain でプリフライト回避）。args は配列（位置引数）。
+// GAS Web App の /exec は 302 を挟み、コールドスタート・同時実行・スプシ一時タイムアウトで
+// たまに JSON 以外や失敗応答を返す。読み取り系はバックオフ付きで数回リトライして安定化する。
 async function api(action, args) {
-  const res = await fetch(window.APP_CONFIG.GAS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action: action, token: idToken, args: args || [] })
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error);
-  return data.result;
+  var maxAttempts = IDEMPOTENT_ACTIONS[action] ? 3 : 1;
+  var lastErr = null;
+  for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      var res = await fetch(window.APP_CONFIG.GAS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: action, token: idToken, args: args || [] })
+      });
+      if (!res.ok) throw new Error('サーバー応答エラー (HTTP ' + res.status + ')');
+      // JSON以外（GASのエラーHTML・ログイン画面等）を res.json() で潰さず、明快なメッセージにする
+      var text = await res.text();
+      var data;
+      try { data = JSON.parse(text); }
+      catch (e) { throw new Error('サーバー応答を解析できません（一時的な混雑の可能性があります）'); }
+      if (!data.ok) throw new Error(data.error);
+      return data.result;
+    } catch (e) {
+      lastErr = e;
+      if (attempt >= maxAttempts) break;
+      // 500ms, 1000ms… と待ってから再試行（コールドスタート/一時タイムアウトの回避）
+      await new Promise(function (r) { setTimeout(r, attempt * 500); });
+    }
+  }
+  throw lastErr;
 }
 
 // google.script.run のシム本体。handler の連鎖と任意メソッド呼び出しをProxyで再現。
