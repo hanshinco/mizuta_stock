@@ -880,32 +880,29 @@ function renderDraftList(mode, list, containerId) {
   });
 }
 
-// 操作ログ表示（モーダルで開く）。全件モード（最新200件まで）
-function openDraftLog() {
-  document.getElementById('draft-modal-title').textContent = '下書き操作ログ（最新200件）';
-  showLoading('操作ログを読み込み中…');
-  google.script.run
+// 操作ログをモーダルで表示する共通処理。タイトル・ローディング文言・サーバー呼び出しだけ差し替える。
+// invoke には handler 設定済みの runner が渡るので、任意の listDraftLogs(...) を呼べる。
+function _showDraftLogs(title, loadingMsg, invoke) {
+  document.getElementById('draft-modal-title').textContent = title;
+  showLoading(loadingMsg);
+  const runner = google.script.run
     .withSuccessHandler(logs => {
       hideLoading();
       renderDraftLog(logs);
       document.getElementById('draft-modal').classList.remove('hidden');
     })
-    .withFailureHandler(failAlert)
-    .listDraftLogs(null, 200);
+    .withFailureHandler(failAlert);
+  invoke(runner);
+}
+
+// 操作ログ表示（モーダルで開く）。全件モード（最新200件まで）
+function openDraftLog() {
+  _showDraftLogs('下書き操作ログ（最新200件）', '操作ログを読み込み中…', r => r.listDraftLogs(null, 200));
 }
 
 // 特定の下書きの操作ログだけをモーダルで表示
 function openDraftLogForId(draftId, label) {
-  document.getElementById('draft-modal-title').textContent = '' + (label ? esc(label) : '下書き') + ' の履歴';
-  showLoading('履歴を読み込み中…');
-  google.script.run
-    .withSuccessHandler(logs => {
-      hideLoading();
-      renderDraftLog(logs);
-      document.getElementById('draft-modal').classList.remove('hidden');
-    })
-    .withFailureHandler(failAlert)
-    .listDraftLogs(draftId);
+  _showDraftLogs('' + (label ? esc(label) : '下書き') + ' の履歴', '履歴を読み込み中…', r => r.listDraftLogs(draftId));
 }
 
 function renderDraftLog(logs) {
