@@ -492,14 +492,6 @@ function renderInventory(data, filtered = false) {
     `${displayed.length} 件表示 / 合計 ${data.length} 件`;
 }
 
-function statusBadge(s) {
-  const map = {
-    '通常': 'normal', 'サンプル': 'sample', 'NG': 'ng',
-    '旧パッケージ': 'old', '新パッケージ': 'new', 'OS': 'os',
-  };
-  return `<span class="badge badge-${map[s] || 'normal'}">${esc(s || '通常')}</span>`;
-}
-
 // HTMLエスケープ。テキストだけでなく属性値（src="..." title="..." 等）にも差し込むため、
 // 引用符 " ' もエスケープして属性からの脱出を防ぐ（値がGoogleプロフィールやマスタでもXSSにしない）。
 function esc(s) {
@@ -773,8 +765,6 @@ function saveDraftRequest(mode) {
   }
 }
 
-let _draftModalMode = 'pull';
-
 // 操作者アイコン（頭文字の色付き丸・title でメール表示）
 function userChip(email) {
   const e = String(email || '');
@@ -821,20 +811,6 @@ function ensureProfiles(emails, cb) {
     })
     .withFailureHandler(() => cb(state._profileCache))
     .getUserProfiles(need);
-}
-
-function openDraftModal(mode) {
-  _draftModalMode = mode;
-  document.getElementById('draft-modal-title').textContent = '下書き一覧';
-  showLoading('下書きを読み込み中…');
-  google.script.run
-    .withSuccessHandler(list => {
-      hideLoading();
-      renderDraftList(mode, list);
-      document.getElementById('draft-modal').classList.remove('hidden');
-    })
-    .withFailureHandler(err => { hideLoading(); alert('エラー: ' + err.message); })
-    .listRequestDrafts(mode);
 }
 
 // パネル用：指定モードの下書きをサーバーから取得して該当パネルに描画
