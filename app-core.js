@@ -350,6 +350,10 @@ function hideLoading() {
 // auth.js が API 失敗時（withFailureHandler 未指定）に参照する共通停止関数。
 function busyOff() { try { hideLoading(); } catch (e) {} }
 
+// google.script.run の共通失敗ハンドラ（オーバーレイを消してエラーを通知）。
+// .withFailureHandler(failAlert) の形でそのまま渡せる（シムは onFailure(err) を呼ぶ）。
+function failAlert(err) { hideLoading(); alert('エラー: ' + err.message); }
+
 // ============================================================
 // 在庫一覧
 // ============================================================
@@ -821,7 +825,7 @@ function loadDraftsList(mode) {
       hideLoading();
       renderDraftList(mode, list, `${mode}-draft-list`);
     })
-    .withFailureHandler(err => { hideLoading(); alert('エラー: ' + err.message); })
+    .withFailureHandler(failAlert)
     .listRequestDrafts(mode);
 }
 
@@ -886,7 +890,7 @@ function openDraftLog() {
       renderDraftLog(logs);
       document.getElementById('draft-modal').classList.remove('hidden');
     })
-    .withFailureHandler(err => { hideLoading(); alert('エラー: ' + err.message); })
+    .withFailureHandler(failAlert)
     .listDraftLogs(null, 200);
 }
 
@@ -900,7 +904,7 @@ function openDraftLogForId(draftId, label) {
       renderDraftLog(logs);
       document.getElementById('draft-modal').classList.remove('hidden');
     })
-    .withFailureHandler(err => { hideLoading(); alert('エラー: ' + err.message); })
+    .withFailureHandler(failAlert)
     .listDraftLogs(draftId);
 }
 
@@ -948,7 +952,7 @@ function loadDraftRequest(mode, id) {
       // フォーム画面（新規作成側）へ遷移
       switchPanel(mode);
     })
-    .withFailureHandler(err => { hideLoading(); alert('エラー: ' + err.message); })
+    .withFailureHandler(failAlert)
     .loadRequestDraft(id);
 }
 
@@ -1744,7 +1748,7 @@ function importExcel() {
         if (res.success) renderDiffs(res.diffs);
         else alert('エラー: ' + res.message);
       })
-      .withFailureHandler(err => { hideLoading(); alert('エラー: ' + err.message); })
+      .withFailureHandler(failAlert)
       .importExcelAndGetDiff(base64, file.name);
   };
   reader.readAsArrayBuffer(file);
@@ -1910,7 +1914,7 @@ function applyReconciliation() {
       document.getElementById('rec-file').value = '';
       loadInventory();
     })
-    .withFailureHandler(err => { hideLoading(); alert('エラー: ' + err.message); })
+    .withFailureHandler(failAlert)
     .applyReconciliation(confirmed);
 }
 
@@ -2088,7 +2092,7 @@ function applyInboundPdf() {
       document.getElementById('inb-file').value = '';
       loadInventory();
     })
-    .withFailureHandler(err => { hideLoading(); alert('エラー: ' + err.message); })
+    .withFailureHandler(failAlert)
     .applyInboundReport(_inboundState.rows);
 }
 
@@ -2103,7 +2107,7 @@ function loadHistory() {
       hideLoading();
       renderHistory(rows);
     })
-    .withFailureHandler(err => { hideLoading(); alert('エラー: ' + err.message); })
+    .withFailureHandler(failAlert)
     .getRequestLog(type);
 }
 
@@ -2213,7 +2217,7 @@ function deleteSelectedHistory() {
         alert(parts.join('\n'));
       }
     })
-    .withFailureHandler(err => { hideLoading(); alert('エラー: ' + err.message); })
+    .withFailureHandler(failAlert)
     .deleteRequestLogRows(rowNums);
 }
 
