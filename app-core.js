@@ -45,6 +45,16 @@ function bindClick(id, fn) {
   if (el) el.addEventListener('click', fn);
 }
 
+// 連続呼び出しをまとめる（検索入力の打鍵ごとの全表再描画を抑える）
+function debounce(fn, ms) {
+  let t = null;
+  return function () {
+    const args = arguments, ctx = this;
+    clearTimeout(t);
+    t = setTimeout(() => fn.apply(ctx, args), ms);
+  };
+}
+
 // サイドバー左下にログインユーザー（写真・氏名・メール）を表示。共通アカウントなら で注意喚起。
 function loadCurrentUserLabel(attempt) {
   attempt = attempt || 1;
@@ -120,7 +130,7 @@ function boot() {
   loadCurrentUserLabel();
 
   // イベント登録
-  document.getElementById('inv-search').addEventListener('input', filterInventory);
+  document.getElementById('inv-search').addEventListener('input', debounce(filterInventory, 120));
   document.getElementById('inv-cat').addEventListener('change', filterInventory);
   document.getElementById('inv-show-zero').addEventListener('change', filterInventory);
 
@@ -343,35 +353,86 @@ function busyOff() { try { hideLoading(); } catch (e) {} }
 // ============================================================
 // 在庫一覧
 // ============================================================
-// useCache=true（ナビでの再訪など）のときは、直近取得のキャッシュが新しければ
-// サーバーへ行かず再描画だけで済ませる。重い3シート読みを毎回走らせないことで
-// 負荷と、一過性ヒカップに当たる回数を減らす。
+// 在庫キャッシュ（localStorage）: リロード/別タブでも前回分を即描画するための先出し用。
+// _search（検索用の正規化キー）は保存せず、復元時に貼り直す（容量節約）。
+const INV_CACHE_KEY = 'mizuta_inv_cache_v1';
+function saveInvCache(list) {
+  try { localStorage.setItem(INV_CACHE_KEY, JSON.stringify(list)); } catch (e) { /* 容量超過等は無視 */ }
+}
+function loadInvCache() {
+  try {
+    const a = JSON.parse(localStorage.getItem(INV_CACHE_KEY) || 'null');
+    return Array.isArray(a) ? a : null;
+  } catch (e) { return null; }
+}
+
+// 各行に検索用の正規化キー _search を一度だけ用意する。以後の検索は毎打鍵の toHalfKana を
+// 走らせず r._search.includes(q) だけで済むため、行数が増えても入力が重くならない。
+function indexInventory(list) {
+  (list || []).forEach(r => {
+    if (r && r._search === undefined) {
+      r._search = toHalfKana(
+        String(r.mizutaCode || '') + ' ' + String(r.mizutaName || '') + ' ' +
+        String(r.yayoiName  || '') + ' ' + String(r.yayoiCode  || '')
+      ).toLowerCase();
+    }
+  });
+  return list;
+}
+
+// useCache=true（ナビ再訪）: 直近取得のメモリキャッシュが新しければ通信しない。
+// 初回（メモリ未取得）: localStorage の前回分を即描画 → 裏で最新を取得して差し替える
+//   （stale-while-revalidate）。これで起動の体感がほぼ即時になる。
 // ★在庫が変わる操作（確定・照合・入庫取込・更新ボタン）の後は必ず loadInventory()（引数なし）で
-//   サーバーから取り直すこと（キャッシュを使わない＝常に最新を表示）。
+//   取り直すこと（キャッシュを使わず最新を表示）。
 const INV_FRESH_MS = 60 * 1000;
 function loadInventory(useCache) {
   if (useCache && Array.isArray(state.inventory) && state.inventory.length
       && state._invLoadedAt && (Date.now() - state._invLoadedAt) < INV_FRESH_MS) {
-    filterInventory();   // キャッシュから即描画（通信なし）
+    filterInventory();   // メモリキャッシュから即描画（通信なし）
     return;
   }
-  showLoading('在庫データを読み込み中…');
+  // 初回でメモリが空なら localStorage から即描画し、裏で最新へ更新（画面は止めない）
+  if (!Array.isArray(state.inventory) || !state.inventory.length) {
+    const cached = loadInvCache();
+    if (cached && cached.length) {
+      state.inventory = indexInventory(cached);
+      buildCategoryFilter(state.inventory);
+      filterInventory();
+      fetchInventory(false);   // 背景更新（stale はもう描画済み）
+      return;
+    }
+  }
+  fetchInventory(true);        // 通常のフォアグラウンド取得
+}
+
+// サーバーから在庫を取得して state・localStorage・表示を更新する共通処理。
+// showOverlay=false は背景更新（画面を止めない・失敗しても既存表示を保持）。
+function fetchInventory(showOverlay) {
+  if (showOverlay) showLoading('在庫データを読み込み中…');
   google.script.run
     .withSuccessHandler(data => {
-      hideLoading();
-      // 一過性の通信失敗で配列以外が返ることがある。ここで弾いて cryptic な
-      // 「Cannot read properties of undefined (reading 'map')」を防ぐ。
+      if (showOverlay) hideLoading();
+      // 一過性の通信失敗で配列以外が返ることがある。cryptic な map エラーを防ぐ。
       if (!Array.isArray(data)) {
-        alert('在庫データを正しく取得できませんでした。通信が不安定な可能性があります。\n'
-          + 'お手数ですが、画面を再読み込みしてください。');
+        if (showOverlay) {
+          alert('在庫データを正しく取得できませんでした。通信が不安定な可能性があります。\n'
+            + 'お手数ですが、画面を再読み込みしてください。');
+        } else {
+          console.warn('在庫の背景更新: 配列以外が返りました。前回表示を維持します。');
+        }
         return; // 既存の state.inventory は壊さない（前回表示を保持）
       }
-      state.inventory = data;
+      saveInvCache(data);                 // _search を付ける前の素データを保存
+      state.inventory = indexInventory(data);
       state._invLoadedAt = Date.now();
-      buildCategoryFilter(data);
+      buildCategoryFilter(state.inventory);
       filterInventory();
     })
-    .withFailureHandler(err => { hideLoading(); alert('エラー: ' + err.message); })
+    .withFailureHandler(err => {
+      if (showOverlay) { hideLoading(); alert('エラー: ' + err.message); }
+      else console.warn('在庫の背景更新に失敗（前回表示を維持）: ' + (err && err.message));
+    })
     .getInventoryList();
 }
 
@@ -395,11 +456,8 @@ function filterInventory() {
     if (!showZero && r.qty === 0) return false;
     if (r.hidden) return false;
     if (cat    && r.cat4Name !== cat) return false;
-    if (q && !(
-      fieldIncludes(r.mizutaCode, q) ||
-      fieldIncludes(r.mizutaName, q) ||
-      fieldIncludes(r.yayoiName,  q)
-    )) return false;
+    // 事前計算した正規化キーで一括判定（弥生コードも対象に含む＝在庫一覧でも弥生コード検索が効く）
+    if (q && !(r._search || '').includes(q)) return false;
     return true;
   });
   renderInventory(filtered, true);
@@ -991,12 +1049,7 @@ function searchInventoryLocal(q, incNG, incSample, incOld) {
       if (r.status === 'サンプル' && !incSample) return false;
       if (r.status === '旧パッケージ' && !incOld) return false;
       if (!ql) return true;
-      return (
-        fieldIncludes(r.mizutaCode, ql) ||
-        fieldIncludes(r.mizutaName, ql) ||
-        fieldIncludes(r.yayoiName,  ql) ||
-        fieldIncludes(r.yayoiCode,  ql)
-      );
+      return (r._search || '').includes(ql);   // 事前計算キーで一括判定（毎打鍵の正規化を回避）
     })
     .slice(0, 30);
 }
