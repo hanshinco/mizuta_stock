@@ -414,8 +414,17 @@ function loadInventory(useCache) {
 // showOverlay=false は背景更新（画面を止めない・失敗しても既存表示を保持）。
 function fetchInventory(showOverlay) {
   if (showOverlay) showLoading('在庫データを読み込み中…');
+  const _measT0 = performance.now();   // [計測] 後で削除
   google.script.run
     .withSuccessHandler(data => {
+      // [計測] 後で削除 ここから：通信+サーバ往復にかかった時間・行数・データサイズ
+      try {
+        const _ms = Math.round(performance.now() - _measT0);
+        const _kb = Array.isArray(data) ? Math.round(JSON.stringify(data).length / 1024) : '?';
+        const _n  = Array.isArray(data) ? data.length : '?';
+        console.log(`[計測] 在庫取得(通信+サーバ): ${_ms}ms / ${_n}行 / 約${_kb}KB${showOverlay ? '' : '（背景更新）'}`);
+      } catch (e) {}
+      // [計測] 後で削除 ここまで
       if (showOverlay) hideLoading();
       // 一過性の通信失敗で配列以外が返ることがある。cryptic な map エラーを防ぐ。
       if (!Array.isArray(data)) {
@@ -468,6 +477,7 @@ function filterInventory() {
 }
 
 function renderInventory(data, filtered = false) {
+  const _measT0 = performance.now();   // [計測] 後で削除
   const tbody = document.getElementById('inv-tbody');
   tbody.innerHTML = '';
   const showZero = document.getElementById('inv-show-zero').checked;
@@ -494,6 +504,9 @@ function renderInventory(data, filtered = false) {
 
   document.getElementById('inv-count').textContent =
     `${displayed.length} 件表示 / 合計 ${data.length} 件`;
+
+  // [計測] 後で削除：この描画(DOM構築)にかかった時間と行数
+  console.log(`[計測] 描画: ${Math.round(performance.now() - _measT0)}ms / ${displayed.length}行`);
 }
 
 // HTMLエスケープ。テキストだけでなく属性値（src="..." title="..." 等）にも差し込むため、
