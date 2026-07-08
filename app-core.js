@@ -620,6 +620,19 @@ function addItemRow(mode) {
   const iriCell = isRet
     ? `<td><input type="number" class="item-iri-input qty" min="1" placeholder="-" style="width:62px;text-align:right" oninput="onIriChange(this,'ret',${id})"></td>`
     : `<td class="text-right item-iri-disp qty">-</td>`;
+  // 返送(逆算方式): 数量は「ケース×入数＋内バラ」で自動算出する読み取り専用セル。引き寄せは従来通り入力。
+  const qtyInput = isRet
+    ? `<input type="number" class="item-qty" readonly tabindex="-1" placeholder="-"
+         style="width:72px;text-align:right;background:var(--gray-100);color:var(--gray-600)">`
+    : `<input type="number" class="item-qty" min="1" value=""
+         oninput="onQtyChange(this, '${mode}', ${id})">`;
+  // 返送(逆算方式): ケース・内バラを入力対象に。内バラは基本ゼロ（既定値0）。引き寄せは表示のみ。
+  const casesCell = isRet
+    ? `<td><input type="number" class="item-cases-input qty" min="0" placeholder="-" style="width:56px;text-align:right" oninput="onCasesChange(this,'ret',${id})"></td>`
+    : `<td class="text-right item-cases qty">-</td>`;
+  const baraCell = isRet
+    ? `<td><input type="number" class="item-bara-input qty" min="0" value="0" style="width:56px;text-align:right" oninput="onCasesChange(this,'ret',${id})"></td>`
+    : `<td class="text-right item-bara qty">-</td>`;
 
   tr.innerHTML =
       itemSearchCell(mode, id, 'item-ycode', 'コード(弥生)')
@@ -629,13 +642,12 @@ function addItemRow(mode) {
     + nameLenCell
     + iriCell
     + `<td>
-        <input type="number" class="item-qty" min="1" value=""
-          oninput="onQtyChange(this, '${mode}', ${id})">
+        ${qtyInput}
         <input type="hidden" class="item-code">
         <input type="hidden" class="item-iri" value="1">
       </td>`
-    + `<td class="text-right item-cases qty">-</td>`
-    + `<td class="text-right item-bara qty">-</td>`
+    + casesCell
+    + baraCell
     + stockCell
     + noteCell
     + `<td><button class="btn btn-danger btn-xs" onclick="removeItemRow(this, '${mode}')">×</button></td>`;
@@ -991,6 +1003,15 @@ function applyDraftPayload(mode, payload) {
     const iriInputEl = tr.querySelector('.item-iri-input');
     if (iriInputEl) iriInputEl.value = it.iri || '';
     if (mode === 'ret') _updateNameLenCell(tr);
+    // 返送(逆算方式): 保存済み下書きは数量ベースなので、ケース/内バラへ復元してから逆算再計算。
+    const casesInputEl = tr.querySelector('.item-cases-input');
+    const baraInputEl  = tr.querySelector('.item-bara-input');
+    if (casesInputEl && baraInputEl) {
+      const iriN = parseInt(it.iri) || 0;
+      const qtyN = parseInt(it.qty) || 0;
+      casesInputEl.value = iriN > 0 ? Math.floor(qtyN / iriN) : '';
+      baraInputEl.value  = iriN > 0 ? (qtyN % iriN) : 0;
+    }
     tr.querySelector('.item-qty').value   = it.qty   || '';
     tr.querySelector('.item-note').value  = it.note  || '';
     // 在庫表示（引き寄せ）
@@ -1003,7 +1024,11 @@ function applyDraftPayload(mode, payload) {
         stock.style.color  = inv.qty === 0 ? 'var(--danger)' : '';
       }
     }
-    onQtyChange(tr.querySelector('.item-qty'), mode);
+    if (mode === 'ret') {
+      recalcRetRow(tr);
+    } else {
+      onQtyChange(tr.querySelector('.item-qty'), mode);
+    }
   });
   updateTotals(mode);
 }
@@ -1121,7 +1146,11 @@ function selectItem(tr, r, mode) {
       stockCell.style.color  = r.qty === 0 ? 'var(--danger)' : '';
     }
   }
-  onQtyChange(tr.querySelector('.item-qty'), mode, tr.dataset.rowId);
+  if (mode === 'ret') {
+    recalcRetRow(tr);
+  } else {
+    onQtyChange(tr.querySelector('.item-qty'), mode, tr.dataset.rowId);
+  }
 }
 
 // 行の商品選択を解除：4つの検索ボックスと選択情報・計算列をリセット（数量・備考は残す）
@@ -1133,8 +1162,10 @@ function clearItemRow(tr, mode) {
   tr.querySelector('.item-iri').value  = '1';
   const iriDisp = tr.querySelector('.item-iri-disp');
   if (iriDisp) iriDisp.textContent = '-';
-  tr.querySelector('.item-cases').textContent = '-';
-  tr.querySelector('.item-bara').textContent  = '-';
+  const casesEl = tr.querySelector('.item-cases');
+  const baraEl  = tr.querySelector('.item-bara');
+  if (casesEl) casesEl.textContent = '-';
+  if (baraEl)  baraEl.textContent  = '-';
   const stockCell = tr.querySelector('.item-stock');
   if (stockCell) {
     stockCell.dataset.code = '';
@@ -1154,8 +1185,11 @@ function onQtyChange(input, mode) {
   const cases = validIri ? Math.floor(qty / iri) : 0;
   const bara  = validIri ? qty % iri : 0;
   // 入数が0/空のときはケース・バラを "-" 表示（要望c）
-  tr.querySelector('.item-cases').textContent = (qty && validIri) ? cases : '-';
-  tr.querySelector('.item-bara').textContent  = (qty && validIri) ? bara  : '-';
+  // ※返送(逆算方式)はケース/内バラが入力セルのため表示セルは存在しない → 何もしない
+  const casesEl = tr.querySelector('.item-cases');
+  const baraEl  = tr.querySelector('.item-bara');
+  if (casesEl) casesEl.textContent = (qty && validIri) ? cases : '-';
+  if (baraEl)  baraEl.textContent  = (qty && validIri) ? bara  : '-';
   // 引き寄せでは在庫数を超える数量を赤塗り＆ツールチップで警告
   if (mode === 'pull') {
     const stockCell = tr.querySelector('.item-stock');
@@ -1176,10 +1210,16 @@ function updateTotals(mode) {
   let totalQty = 0, totalCases = 0;
   tbody.querySelectorAll('tr').forEach(tr => {
     const qty  = parseInt(tr.querySelector('.item-qty').value)  || 0;
-    const iriInput = tr.querySelector('.item-iri-input');
-    const iri  = parseInt(iriInput ? iriInput.value : tr.querySelector('.item-iri').value) || 0;
     totalQty   += qty;
-    if (iri > 0) totalCases += Math.floor(qty / iri);
+    // 返送(逆算方式)はケースを直接入力。引き寄せは数量÷入数で算出。
+    const casesInput = tr.querySelector('.item-cases-input');
+    if (casesInput) {
+      totalCases += parseInt(casesInput.value) || 0;
+    } else {
+      const iriInput = tr.querySelector('.item-iri-input');
+      const iri  = parseInt(iriInput ? iriInput.value : tr.querySelector('.item-iri').value) || 0;
+      if (iri > 0) totalCases += Math.floor(qty / iri);
+    }
   });
   document.getElementById(`${mode}-total-qty`).textContent   = totalQty;
   document.getElementById(`${mode}-total-cases`).textContent = totalCases;
@@ -1196,13 +1236,18 @@ function collectItems(mode) {
       const mname = tr.querySelector('.item-mname').value.trim();
       const yayoiCode  = tr.querySelector('.item-ycode').value.trim();
       const yayoiName  = tr.querySelector('.item-yname').value.trim();
-      const qty   = parseInt(tr.querySelector('.item-qty').value) || 0;
       const iriInput = tr.querySelector('.item-iri-input');
       const iriRaw   = iriInput ? iriInput.value : tr.querySelector('.item-iri').value;
       const iri   = parseInt(iriRaw);
+      // 逆算方式: 数量 = ケース×入数 + 内バラ（内バラは既定0）
+      const casesInput = tr.querySelector('.item-cases-input');
+      const baraInput  = tr.querySelector('.item-bara-input');
+      const cases = parseInt(casesInput ? casesInput.value : '') || 0;
+      const bara  = parseInt(baraInput  ? baraInput.value  : '') || 0;
+      const qty   = (!isNaN(iri) && iri > 0) ? (cases * iri + bara) : 0;
       const note  = tr.querySelector('.item-note').value.trim();
-      // 「使用中の行」判定: ミズタコード / ミズタ商品名 / 数量 のいずれかが入っていれば
-      if (!mcode && !mname && qty <= 0) return;
+      // 「使用中の行」判定: ミズタコード / ミズタ商品名 / ケース or 内バラ のいずれかが入っていれば
+      if (!mcode && !mname && cases <= 0 && bara <= 0) return;
       if (!mcode) { error = 'ミズタコードが空の行があります。'; return; }
       if (!mname) { error = `ミズタ商品名が空の行があります（${mcode}）。`; return; }
       if (halfWidthLen(mname) > 36) {
@@ -1211,7 +1256,10 @@ function collectItems(mode) {
       if (isNaN(iri) || iri <= 0) {
         error = `入数が0または空欄の行があります（${mcode}）。`; return;
       }
-      if (qty <= 0) { error = `数量が0または空欄の行があります（${mcode}）。`; return; }
+      if (bara >= iri) {
+        error = `内バラは入数未満にしてください（${mcode}：入数${iri}／内バラ${bara}）。`; return;
+      }
+      if (qty <= 0) { error = `ケース・内バラが未入力の行があります（${mcode}）。`; return; }
       items.push({ mizutaCode: mcode, mizutaName: mname, yayoiName, yayoiCode, qty, iri, note });
       return;
     }
@@ -1236,19 +1284,35 @@ function collectItems(mode) {
   return { items, error };
 }
 
-// 返送モード: 入数 input の変化で hidden item-iri にミラーし、ケース/バラを即時再計算。
-//   入数=0/空 のときは入数セルを赤塗り（要望b/c）。
-function onIriChange(input, mode, rowId) {
-  const tr = input.closest('tr');
-  const v  = parseInt(input.value);
-  const valid = !isNaN(v) && v > 0;
-  // hidden item-iri へミラー（updateTotals 等の既存処理は hidden 経由でも整合させる）。
-  // 無効値時は 0 を入れ、計算系（updateTotals/onQtyChange）側で「0=計算しない」とみなす。
-  tr.querySelector('.item-iri').value = valid ? v : 0;
-  input.classList.toggle('iri-err', !valid);
-  // 数量と組み合わせてケース/バラ再計算
+// 返送モード(逆算方式): 入数・ケース・内バラ から数量を再計算する共通処理。
+//   数量 = ケース×入数 + 内バラ。入数=0/空 のときは入数セルを赤塗り（要望b/c）。
+function recalcRetRow(tr) {
+  const iriInput = tr.querySelector('.item-iri-input');
+  const v  = parseInt(iriInput ? iriInput.value : tr.querySelector('.item-iri').value);
+  const validIri = !isNaN(v) && v > 0;
+  // hidden item-iri へミラー（0=計算しない）。入数セルの赤塗りも同期。
+  tr.querySelector('.item-iri').value = validIri ? v : 0;
+  if (iriInput) iriInput.classList.toggle('iri-err', !validIri);
+
+  const casesEl = tr.querySelector('.item-cases-input');
+  const baraEl  = tr.querySelector('.item-bara-input');
+  const cases = parseInt(casesEl ? casesEl.value : '') || 0;
+  const bara  = parseInt(baraEl  ? baraEl.value  : '') || 0;
   const qtyEl = tr.querySelector('.item-qty');
-  if (qtyEl) onQtyChange(qtyEl, mode, rowId);
+  if (qtyEl) {
+    qtyEl.value = (validIri && (cases > 0 || bara > 0)) ? (cases * v + bara) : '';
+  }
+  updateTotals('ret');
+}
+
+// 返送モード: 入数 input の変化 → 逆算再計算。
+function onIriChange(input, mode, rowId) {
+  recalcRetRow(input.closest('tr'));
+}
+
+// 返送モード: ケース／内バラ input の変化 → 逆算再計算。
+function onCasesChange(input, mode, rowId) {
+  recalcRetRow(input.closest('tr'));
 }
 
 // 返送モード: ミズタ商品名 input の変化で文字数セルを再計算（36バイト超で赤塗り）。
